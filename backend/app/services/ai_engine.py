@@ -1,9 +1,11 @@
 import json
 from typing import Optional
-from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.core.config import settings
+from app.services.llm_factory import get_llm
+import logging
 
+logger = logging.getLogger(__name__)
 
 LOG_ANALYSIS_SYSTEM_PROMPT = """
 You are an expert DevOps engineer and SRE specialist.
@@ -28,19 +30,13 @@ Respond ONLY with valid JSON in this exact format:
 
 
 class AIEngine:
-    def __init__(self):
-        self.llm = ChatGroq(
-            api_key=settings.GROQ_API_KEY,
-            model_name=settings.DEFAULT_LLM_MODEL,
-            temperature=0.1,
-            max_tokens=2048,
-        )
+    def __init__(self, provider: Optional[str] = None, model: Optional[str] = None):
+        self.provider = provider or settings.DEFAULT_LLM_PROVIDER
+        self.model = model or settings.DEFAULT_LLM_MODEL
+        self.llm = get_llm(self.provider, self.model)
 
     async def analyze_log(self, log_text: str, pipeline_name: Optional[str] = None) -> dict:
-        """Analyze a CI/CD failure log and return structured diagnosis."""
-        # Truncate log to avoid token limits (keep last 8000 chars - most relevant)
         truncated_log = log_text[-8000:] if len(log_text) > 8000 else log_text
-
         context = f"Pipeline: {pipeline_name}\n\n" if pipeline_name else ""
         user_message = f"{context}Failed CI/CD Log:\n\n```\n{truncated_log}\n```"
 
@@ -49,10 +45,16 @@ class AIEngine:
             HumanMessage(content=user_message),
         ]
 
-        response = await self.llm.ainvoke(messages)
-        content = response.content.strip()
+        # Try primary provider, fallback to Groq
+        try:
+            response = await self.llm.ainvoke(messages)
+        except Exception as e:
+            logger.warning(f"Primary LLM ({self.provider}) failed: {e}. Falling back to Groq.")
+            from langchain_groq import ChatGroq
+            fallback = ChatGroq(api_key=settings.GROQ_API_KEY, model_name="llama3-70b-8192", temperature=0.1)
+            response = await fallback.ainvoke(messages)
 
-        # Strip markdown code fences if present
+        content = response.content.strip()
         if content.startswith("```"):
             content = content.split("```")[1]
             if content.startswith("json"):
@@ -70,10 +72,9 @@ class AIEngine:
                 "confidence_score": 0.0,
             }
 
-        result["tokens_used"] = response.usage_metadata.get("total_tokens", 0) if hasattr(response, "usage_metadata") else 0
-        result["llm_model"] = settings.DEFAULT_LLM_MODEL
-        result["llm_provider"] = settings.DEFAULT_LLM_PROVIDER
-
+        result["tokens_used"] = getattr(response, "usage_metadata", {}).get("total_tokens", 0)
+        result["llm_model"] = self.model
+        result["llm_provider"] = self.provider
         return result
 
 
