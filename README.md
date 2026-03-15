@@ -16,7 +16,7 @@
 [![Deploy on Vercel](https://img.shields.io/badge/Deploy-Vercel-black?style=flat-square&logo=vercel)](https://vercel.com)
 [![GitHub Stars](https://img.shields.io/github/stars/SamoTech/opsai?style=flat-square&color=yellow)](https://github.com/SamoTech/opsai/stargazers)
 
-[**Live Demo**](https://opsai.vercel.app) · [**API Docs**](https://opsai-api.vercel.app/docs) · [**Report Bug**](https://github.com/SamoTech/opsai/issues) · [**Request Feature**](https://github.com/SamoTech/opsai/issues)
+[**Report Bug**](https://github.com/SamoTech/opsai/issues) · [**Request Feature**](https://github.com/SamoTech/opsai/issues) · [**Discussions**](https://github.com/SamoTech/opsai/discussions)
 
 </div>
 
