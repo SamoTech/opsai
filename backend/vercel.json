@@ -1,0 +1,29 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "builds": [
+    {
+      "src": "app/main.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "app/main.py"
+    }
+  ],
+  "env": {
+    "APP_SECRET_KEY": "@opsai_secret_key",
+    "GROQ_API_KEY": "@groq_api_key",
+    "DATABASE_URL": "@opsai_database_url",
+    "REDIS_URL": "@opsai_redis_url",
+    "GITHUB_WEBHOOK_SECRET": "@github_webhook_secret",
+    "SLACK_BOT_TOKEN": "@slack_bot_token",
+    "DEFAULT_LLM_PROVIDER": "groq",
+    "DEFAULT_LLM_MODEL": "llama3-70b-8192"
+  }
+}
