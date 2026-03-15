@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #030712;
+  --foreground: #f9fafb;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.card {
+  @apply bg-gray-900 border border-gray-800 rounded-xl p-6;
+}
+
+.badge-failed {
+  @apply bg-red-900/40 text-red-400 border border-red-800 px-2 py-0.5 rounded-full text-xs font-medium;
+}
+
+.badge-success {
+  @apply bg-green-900/40 text-green-400 border border-green-800 px-2 py-0.5 rounded-full text-xs font-medium;
+}
+
+.badge-pending {
+  @apply bg-yellow-900/40 text-yellow-400 border border-yellow-800 px-2 py-0.5 rounded-full text-xs font-medium;
+}
