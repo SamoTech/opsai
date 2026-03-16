@@ -27,14 +27,27 @@ services:
       timeout: 5s
       retries: 5
 
+  # Fix 10: Run Alembic migrations ONCE before the app starts.
+  # The backend service waits for this to complete successfully.
+  migrate:
+    build: ./backend
+    command: alembic -c /app/alembic.ini upgrade head
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./database:/app/database
+
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     env_file: .env
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     volumes:
@@ -46,8 +59,12 @@ services:
     command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
     env_file: .env
     depends_on:
-      - redis
-      - postgres
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     volumes:
       - ./backend:/app
 
