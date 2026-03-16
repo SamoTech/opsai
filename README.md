@@ -34,7 +34,7 @@ When your pipeline fails, OpsAI:
 4. 💡 **Suggests** a specific, actionable fix with code snippet
 5. 💬 **Comments** the fix directly on your GitHub PR
 6. 🔧 **Opens** an auto-fix Pull Request (optional)
-7. 🔔 **Alerts** your team on Slack with an AI summary
+7. 🔔 **Alerts** your team on Slack and via Email with an AI summary
 8. 📊 **Tracks** reliability trends and recurring failures
 
 ---
@@ -55,21 +55,27 @@ When your pipeline fails, OpsAI:
 
 ### 📊 Dashboard & Analytics
 - Real-time pipeline health dashboard
-- **WebSocket live updates** — no page refresh needed
+- **WebSocket live updates** via Redis pub/sub — works across all server processes and Celery workers, no page refresh needed
+- **Dashboard stats** — project counts, run counts, 7-day activity, average AI confidence score
 - Failure trend heatmap and MTTR tracking
 - **Recurring failure detection** — alerts when same error repeats 3+ times
 - **Reliability score** (0–100) per project with embeddable README badge
 
 ### 🔔 Notifications
 - Rich **Slack** block messages with fix suggestion
-- **Email** alerts via SMTP
+- **Email** alerts via SMTP (aiosmtplib, async, HTML template)
 - **Browser push notifications** on analysis complete
 - GitHub PR review comments with full analysis
 
+### 🔐 Authentication
+- **httpOnly cookie** JWT sessions (no localStorage, XSS-safe)
+- **SSO** via Google OAuth + GitHub OAuth (Authlib)
+- Email/password registration with bcrypt hashing
+- Reusable `get_current_user` FastAPI dependency — reads cookie first, falls back to Bearer header for API/CLI clients
+
 ### 💳 SaaS & Teams
-- **Stripe billing** — Free / Pro ($29/mo) / Team ($99/mo)
+- **Stripe billing** — Free / Pro ($29/mo) / Team ($99/mo) — stripe-python v5
 - **Team workspaces** with Owner / Admin / Viewer roles
-- **SSO** via Google OAuth + GitHub OAuth
 - **API keys** with SHA-256 hashing, rate limiting, usage tracking
 - Public REST API + Python & JavaScript SDKs
 
@@ -79,17 +85,19 @@ When your pipeline fails, OpsAI:
 
 ```
 ┌────────────────────────────────────────────────────┐
-│                  OpsAI Platform                  │
+│                  OpsAI Platform                    │
 ├───────────────┬────────────────────────────────────┤
-│   Frontend    │  Next.js 14 + Tailwind + React Query  │
+│   Frontend    │  Next.js 14 + Tailwind + React Query│
 ├───────────────┼────────────────────────────────────┤
-│   API Layer   │  FastAPI + WebSocket (Python 3.11)     │
+│   API Layer   │  FastAPI + WebSocket (Python 3.11)  │
 ├───────────────┼────────────────────────────────────┤
-│  AI Engine    │  LangChain + Groq / OpenAI / Anthropic │
+│  AI Engine    │  LangChain + Groq / OpenAI / Claude │
 ├───────────────┼────────────────────────────────────┤
-│  Task Queue   │  Celery + Redis (async processing)     │
+│  Task Queue   │  Celery + Redis (async processing)  │
 ├───────────────┼────────────────────────────────────┤
-│   Database    │  PostgreSQL + Redis cache              │
+│   Pub/Sub     │  Redis channels (WS cross-process)  │
+├───────────────┼────────────────────────────────────┤
+│   Database    │  PostgreSQL + Alembic migrations    │
 └───────────────┴────────────────────────────────────┘
 ```
 
@@ -103,9 +111,11 @@ When your pipeline fails, OpsAI:
 git clone https://github.com/SamoTech/opsai.git
 cd opsai
 cp .env.example .env
-# Add your GROQ_API_KEY to .env
-docker-compose up --build
+# Add your GROQ_API_KEY (and any optional keys) to .env
+docker compose up --build
 ```
+
+Docker Compose will automatically run **Alembic migrations** before starting the backend — no manual `alembic upgrade head` needed.
 
 | Service | URL |
 |---------|-----|
@@ -127,40 +137,70 @@ Workers  → Railway                 → ~$5/mo
 
 ---
 
+## 🔧 Environment Variables
+
+Copy `.env.example` to `.env` and fill in the values you need:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `APP_SECRET_KEY` | ✅ | Random secret for JWT signing + session middleware |
+| `DATABASE_URL` | ✅ | `postgresql+asyncpg://user:pass@host/db` |
+| `REDIS_URL` | ✅ | `redis://localhost:6379` — used by Celery, rate limiter, and WebSocket pub/sub |
+| `GROQ_API_KEY` | ✅ | Default free LLM provider |
+| `OPENAI_API_KEY` | optional | GPT-4o support |
+| `ANTHROPIC_API_KEY` | optional | Claude support |
+| `GITHUB_WEBHOOK_SECRET` | optional | HMAC webhook verification |
+| `SLACK_BOT_TOKEN` | optional | Slack notifications |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | optional | Email notifications |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRO_PRICE_ID` / `STRIPE_TEAM_PRICE_ID` | optional | Billing |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | optional | Google OAuth |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | optional | GitHub OAuth |
+| `APP_BASE_URL` | optional | Public base URL, e.g. `https://app.opsai.dev` (used by OAuth callbacks) |
+| `ENVIRONMENT` | optional | `production` disables `create_tables()` — use Alembic instead |
+
+---
+
 ## 📁 Project Structure
 
 ```
 opsai/
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/endpoints/   ← auth, projects, webhooks, runs,
-│   │   │                        billing, api_keys, analytics,
-│   │   │                        teams, websocket
-│   │   ├── core/               ← config, database, security
-│   │   ├── models/             ← user, project, pipeline,
-│   │   │                        api_key, subscription, team
-│   │   ├── services/           ← ai_engine, llm_factory,
-│   │   │                        github_service, stripe_service,
-│   │   │                        pattern_service, notification,
-│   │   │                        reliability_badge
-│   │   └── workers/            ← celery tasks (async AI analysis)
+│   │   ├── api/
+│   │   │   ├── deps.py             ← get_current_user dependency
+│   │   │   └── v1/endpoints/       ← auth, oauth, projects, webhooks,
+│   │   │                             runs, billing, api_keys, analytics,
+│   │   │                             teams, stats, websocket
+│   │   ├── core/                   ← config, database, security, limiter
+│   │   ├── models/                 ← user, project, pipeline,
+│   │   │                             api_key, subscription, team
+│   │   ├── schemas/                ← pipeline, user, pagination, stats
+│   │   ├── services/               ← ai_engine, llm_factory,
+│   │   │                             github_service, stripe_service,
+│   │   │                             pattern_service, notification_service,
+│   │   │                             reliability_badge
+│   │   └── workers/                ← celery tasks (async AI analysis)
 │   ├── tests/
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── app/                ← dashboard, projects, runs,
-│   │   │                        billing, api-keys, team
-│   │   ├── components/         ← Sidebar, DashboardStats,
-│   │   │                        RecentRuns
-│   │   ├── hooks/              ← useRealtimeRuns (WebSocket)
-│   │   └── lib/                ← axios API client
+│   │   ├── app/                    ← dashboard, projects, runs,
+│   │   │                             billing, api-keys, team, settings
+│   │   ├── components/             ← Sidebar (full nav + logout),
+│   │   │                             DashboardStats, RecentRuns
+│   │   ├── hooks/                  ← useRealtimeRuns (WebSocket)
+│   │   └── lib/                    ← axios API client (withCredentials)
 │   └── Dockerfile
-├── database/migrations/        ← Alembic
-├── docker-compose.yml
+├── database/
+│   └── migrations/
+│       ├── env.py                  ← single `import app.models` pattern
+│       └── versions/
+│           └── 001_add_missing_fields.py
+├── docker-compose.yml              ← includes 'migrate' service
 ├── .github/
 │   ├── workflows/
-│   │   ├── ci.yml              ← test + lint + build on every PR
-│   │   └── deploy.yml          ← auto-deploy to VPS on main push
+│   │   ├── ci.yml                  ← test + lint + build on every PR
+│   │   └── deploy.yml              ← auto-deploy to VPS on main push
 │   └── FUNDING.yml
 ├── docs/
 │   ├── DEPLOYMENT.md
@@ -183,17 +223,23 @@ Full interactive docs available at `/docs` (Swagger UI) after starting the backe
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/v1/auth/register` | Register new user |
-| `POST` | `/api/v1/auth/login` | Login + get JWT |
+| `POST` | `/api/v1/auth/login` | Login — sets httpOnly JWT cookie |
+| `POST` | `/api/v1/auth/logout` | Logout — clears httpOnly cookie |
+| `GET` | `/api/v1/auth/oauth/{provider}` | Start Google or GitHub OAuth flow |
+| `GET` | `/api/v1/auth/oauth/{provider}/callback` | OAuth callback — sets cookie, redirects to dashboard |
 | `POST` | `/api/v1/projects/` | Create project |
+| `GET` | `/api/v1/projects/` | List projects (paginated) |
 | `POST` | `/api/v1/webhooks/github/{id}` | GitHub Actions webhook |
 | `POST` | `/api/v1/webhooks/gitlab/{id}` | GitLab CI webhook |
 | `POST` | `/api/v1/webhooks/jenkins/{id}` | Jenkins webhook |
+| `GET` | `/api/v1/runs/project/{id}` | List runs (paginated) |
 | `GET` | `/api/v1/runs/{run_id}/analysis` | Get AI analysis |
+| `GET` | `/api/v1/stats/` | Dashboard stats (projects, runs, confidence) |
 | `GET` | `/api/v1/analytics/projects/{id}/patterns` | Failure patterns |
 | `GET` | `/api/v1/analytics/badge/{id}` | Reliability SVG badge |
 | `GET` | `/api/v1/billing/plans` | Subscription plans |
 | `POST` | `/api/v1/billing/checkout` | Create Stripe checkout |
-| `WS` | `/api/v1/ws/projects/{id}` | Real-time WebSocket |
+| `WS` | `/api/v1/ws/projects/{id}` | Real-time WebSocket (Redis pub/sub) |
 
 ### SDK Usage
 
@@ -233,11 +279,13 @@ console.log(result.fixSuggestion);
 
 ## 🛡️ Security
 
-- 🔐 JWT authentication with bcrypt password hashing
-- 🖊️ HMAC-SHA256 webhook signature verification
+- 🔐 **httpOnly cookie** JWT sessions — tokens never exposed to JavaScript (XSS-safe)
+- 🔑 bcrypt password hashing
+- ✍️ **HMAC-SHA256** webhook signature verification (`hmac.digest()`)
 - 🔑 API keys stored as SHA-256 hashes (never plaintext)
+- 🚦 **Rate limiting** — slowapi + Redis: 5/min register, 10/min login, 100/min per-project webhooks
 - 🚧 Non-root Docker containers
-- 🔒 CORS restricted to configured origins
+- 🔒 CORS restricted to configured origins (never `*` with credentials)
 - 📦 All secrets via environment variables
 
 See [**docs/SECURITY.md**](docs/SECURITY.md) for full security guide.
@@ -288,11 +336,15 @@ git push origin feat/amazing-feature
 - [x] AI log analysis (Groq / OpenAI / Anthropic / Ollama)
 - [x] Auto-fix Pull Requests
 - [x] GitHub PR comment bot
-- [x] Real-time WebSocket dashboard
-- [x] Stripe billing (Free / Pro / Team)
-- [x] Team workspaces + SSO
+- [x] Real-time WebSocket dashboard (Redis pub/sub, multi-process)
+- [x] Stripe billing — Free / Pro / Team (stripe-python v5)
+- [x] Team workspaces + SSO (Google OAuth + GitHub OAuth)
 - [x] Reliability score + README badge
 - [x] Public API + Python & JS SDKs
+- [x] httpOnly cookie auth + rate limiting
+- [x] Email notifications (aiosmtplib)
+- [x] Dashboard stats endpoint (`GET /stats`)
+- [x] Alembic migrations + Docker migrate service
 - [ ] Bitbucket Pipelines
 - [ ] Mobile app
 - [ ] GitHub Marketplace listing
