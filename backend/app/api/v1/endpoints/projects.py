@@ -1,12 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import secrets
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+
+from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.project import Project
-from pydantic import BaseModel
-from typing import Optional, List
-from uuid import UUID
-import secrets
+from app.models.user import User
 
 router = APIRouter()
 
@@ -31,17 +35,22 @@ class ProjectResponse(BaseModel):
         from_attributes = True
 
 
-@router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
-async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_db)):
-    # In production, extract user_id from JWT token
-    from app.models.user import User
-    result = await db.execute(select(User).limit(1))
-    owner = result.scalar_one_or_none()
-    if not owner:
-        raise HTTPException(status_code=400, detail="No users found. Register first.")
+class PagedProjectResponse(BaseModel):
+    items: List[ProjectResponse]
+    total: int
+    page: int
+    pages: int
+    limit: int
 
+
+@router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+async def create_project(
+    payload: ProjectCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     project = Project(
-        owner_id=owner.id,
+        owner_id=current_user.id,
         name=payload.name,
         description=payload.description,
         repo_url=payload.repo_url,
@@ -55,7 +64,32 @@ async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_
     return project
 
 
-@router.get("/", response_model=List[ProjectResponse])
-async def list_projects(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Project).where(Project.is_active == True))
-    return result.scalars().all()
+@router.get("/", response_model=PagedProjectResponse)
+async def list_projects(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    offset = (page - 1) * limit
+    base_q = select(Project).where(
+        Project.owner_id == current_user.id,
+        Project.is_active == True,
+    ).order_by(Project.created_at.desc())
+
+    total_result = await db.execute(
+        select(func.count()).select_from(base_q.subquery())
+    )
+    total = total_result.scalar_one()
+
+    data_result = await db.execute(base_q.offset(offset).limit(limit))
+    items = data_result.scalars().all()
+
+    import math
+    return PagedProjectResponse(
+        items=items,
+        total=total,
+        page=page,
+        pages=math.ceil(total / limit) if limit else 1,
+        limit=limit,
+    )
