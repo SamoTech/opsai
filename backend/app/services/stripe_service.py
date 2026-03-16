@@ -15,7 +15,9 @@ PLANS = {
 
 
 class StripeService:
-    async def create_checkout_session(self, user_id: str, plan: str, success_url: str, cancel_url: str) -> Optional[str]:
+    async def create_checkout_session(
+        self, user_id: str, plan: str, success_url: str, cancel_url: str
+    ) -> Optional[str]:
         if plan not in PLANS or not PLANS[plan]["price_id"]:
             return None
         try:
@@ -28,25 +30,33 @@ class StripeService:
                 allow_promotion_codes=True,
             )
             return session.url
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
+            # Fix 17: stripe.error.StripeError was removed in stripe-python v5.
+            # The exception is now stripe.StripeError (top-level).
             logger.error(f"Stripe checkout error: {e}")
             return None
 
-    async def create_billing_portal(self, customer_id: str, return_url: str) -> Optional[str]:
+    async def create_billing_portal(
+        self, customer_id: str, return_url: str
+    ) -> Optional[str]:
         try:
             session = stripe.billing_portal.Session.create(
                 customer=customer_id,
                 return_url=return_url,
             )
             return session.url
-        except stripe.error.StripeError as e:
+        except stripe.StripeError as e:
             logger.error(f"Stripe portal error: {e}")
             return None
 
     def construct_webhook_event(self, payload: bytes, sig_header: str):
-        return stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
+        try:
+            return stripe.Webhook.construct_event(
+                payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+            )
+        except stripe.StripeError as e:
+            logger.error(f"Stripe webhook verification failed: {e}")
+            raise
 
 
 stripe_service = StripeService()
