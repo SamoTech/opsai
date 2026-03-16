@@ -1,4 +1,5 @@
 import asyncio
+
 from app.workers.celery_app import celery_app
 from app.core.database import AsyncSessionLocal
 from app.services.ai_engine import ai_engine
@@ -15,10 +16,20 @@ logger = logging.getLogger(__name__)
 
 @celery_app.task(bind=True, max_retries=3)
 def analyze_pipeline_run(self, run_id: str):
+    """Synchronous Celery task that drives an async workflow.
+
+    asyncio.run() creates a brand-new event loop, runs the coroutine to
+    completion, then tears down the loop cleanly.  This is the correct
+    Python 3.10+ pattern — asyncio.get_event_loop() is deprecated in threads
+    that have no running loop (which is every Celery worker thread).
+    """
     try:
-        asyncio.get_event_loop().run_until_complete(_analyze_run(run_id))
+        asyncio.run(_analyze_run(run_id))
     except Exception as exc:
-        logger.error(f"Task failed for run {run_id}: {exc}")
+        logger.error(f"Task failed for run {run_id}: {exc}", exc_info=True)
+        # self.retry() raises celery.exceptions.Retry which propagates
+        # correctly through asyncio.run() since it is raised synchronously
+        # after the coroutine returns/raises.
         raise self.retry(exc=exc, countdown=60)
 
 
@@ -33,7 +44,6 @@ async def _analyze_run(run_id: str):
         proj_result = await db.execute(select(Project).where(Project.id == run.project_id))
         project = proj_result.scalar_one_or_none()
 
-        # Use project-level LLM config if set
         llm_provider = getattr(project, 'llm_provider', None) if project else None
         llm_model = getattr(project, 'llm_model', None) if project else None
 
@@ -61,7 +71,7 @@ async def _analyze_run(run_id: str):
         # ─ WebSocket broadcast
         try:
             from app.api.v1.endpoints.websocket import broadcast_to_project
-            await broadcast_to_project(str(run.project_id), {
+            broadcast_to_project(str(run.project_id), {
                 "type": "analysis_complete",
                 "run_id": str(run.id),
                 "status": "failed",
@@ -83,10 +93,23 @@ async def _analyze_run(run_id: str):
                 run_id=str(run.id),
             )
 
-        # ─ GitHub PR comment (if PR number and repo available)
-        repo_full_name = getattr(run, 'repo_full_name', None)
-        pr_number = getattr(run, 'pr_number', None)
-        if repo_full_name and pr_number and getattr(project, 'pr_comments_enabled', False):
+        # ─ Email notification
+        if project and project.alert_email and analysis.root_cause_summary:
+            frontend_url = getattr(__import__('app.core.config', fromlist=['settings']).settings, 'ALLOWED_ORIGINS', ['http://localhost:3000'])[0]
+            await notification_service.send_email(
+                to_email=project.alert_email,
+                pipeline_name=run.pipeline_name or "Unknown Pipeline",
+                branch=run.branch or "unknown",
+                root_cause=analysis.root_cause_summary,
+                fix_suggestion=analysis.fix_suggestion or "No suggestion available.",
+                confidence=analysis.confidence_score,
+                run_url=f"{frontend_url}/runs/{run.id}",
+            )
+
+        # ─ GitHub PR comment
+        repo_full_name = run.repo_full_name
+        pr_number = run.pr_number
+        if repo_full_name and pr_number and project and project.pr_comments_enabled:
             await github_service.post_pr_comment(
                 repo_full_name=repo_full_name,
                 pr_number=int(pr_number),
@@ -94,9 +117,9 @@ async def _analyze_run(run_id: str):
                 run_id=str(run.id),
             )
 
-        # ─ Auto-fix PR (if enabled and confidence high enough)
+        # ─ Auto-fix PR
         if repo_full_name and run.branch and analysis.confidence_score >= 0.75:
-            if getattr(project, 'auto_fix_enabled', False):
+            if project and project.auto_fix_enabled:
                 pr_url = await github_service.create_fix_pr(
                     repo_full_name=repo_full_name,
                     base_branch=run.branch,

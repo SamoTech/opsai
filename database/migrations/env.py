@@ -7,7 +7,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
 
 from app.core.database import Base
-from app.models import user, project, pipeline  # noqa: import all models
+import app.models  # noqa: F401 — triggers __init__.py, registers ALL models with Base.metadata
 
 config = context.config
 if config.config_file_name is not None:

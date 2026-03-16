@@ -3,6 +3,8 @@ uvicorn[standard]==0.29.0
 sqlalchemy==2.0.29
 alembic==1.13.1
 psycopg2-binary==2.9.9
+# Fix 7: asyncpg required for postgresql+asyncpg:// async driver
+asyncpg==0.29.0
 redis==5.0.3
 celery==5.3.6
 pydantic==2.6.4
@@ -12,13 +14,23 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.9
 httpx==0.27.0
 langchain==0.1.16
+langchain-core==0.1.52
+langchain-community==0.0.38
 langchain-groq==0.1.3
 langchain-openai==0.1.3
+# Fix 7: Anthropic Claude provider — both packages required
+langchain-anthropic==0.1.23
+anthropix==0.26.1
 groq==0.5.0
 slack-sdk==3.27.1
 aiosmtplib==3.0.1
 boto3==1.34.69
+# Fix 4: Redis-backed rate limiting
+slowapi==0.1.9
+# Fix 15: OAuth (Google + GitHub) via Authlib + SessionMiddleware
+authlib==1.3.0
+itsdangerous==2.2.0
 pytest==8.1.1
 pytest-asyncio==0.23.6
-httpx==0.27.0
 python-dotenv==1.0.1
+stripe>=5.0.0,<6.0.0
