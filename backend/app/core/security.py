@@ -37,12 +37,20 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 
 def verify_github_signature(payload_body: bytes, signature: str) -> bool:
-    """Verify GitHub webhook HMAC signature."""
+    """Verify GitHub webhook HMAC-SHA256 signature.
+
+    Uses hmac.digest() — the correct, C-accelerated one-shot API in Python 3.7+.
+    hmac.compare_digest() prevents timing side-channel attacks.
+    """
     if not signature or not signature.startswith("sha256="):
         return False
-    expected = hmac.new(
-        settings.GITHUB_WEBHOOK_SECRET.encode(),
+    secret = getattr(settings, "GITHUB_WEBHOOK_SECRET", None)
+    if not secret:
+        return False
+    expected_bytes = hmac.digest(
+        secret.encode("utf-8"),
         payload_body,
-        hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(f"sha256={expected}", signature)
+        "sha256",
+    )
+    expected_sig = "sha256=" + expected_bytes.hex()
+    return hmac.compare_digest(expected_sig, signature)

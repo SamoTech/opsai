@@ -7,25 +7,17 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Sends httpOnly cookies automatically on every request.
+  // No manual token handling needed — the browser manages the cookie.
+  withCredentials: true,
 });
 
-// Attach JWT token if available
-api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('opsai_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-  }
-  return config;
-});
-
-// Handle 401 globally
+// Global 401 handler — redirect to login when session expires.
+// No localStorage access; token lives in a secure httpOnly cookie.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('opsai_token');
       window.location.href = '/login';
     }
     return Promise.reject(error);

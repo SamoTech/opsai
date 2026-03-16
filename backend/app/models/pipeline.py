@@ -30,7 +30,7 @@ class PipelineRun(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
-    external_run_id = Column(String(255))  # GitHub Actions run ID
+    external_run_id = Column(String(255))  # GitHub Actions / GitLab / Jenkins run ID
     pipeline_name = Column(String(255))
     branch = Column(String(255))
     commit_sha = Column(String(40))
@@ -41,6 +41,9 @@ class PipelineRun(Base):
     duration_seconds = Column(Integer)
     raw_log_url = Column(String(500))
     raw_log_text = Column(Text)
+    # Fix 6: fields required by tasks.py for PR comments and auto-fix PRs
+    repo_full_name = Column(String(255), nullable=True)  # e.g. "owner/repo"
+    pr_number = Column(Integer, nullable=True)           # GitHub PR number
     created_at = Column(DateTime, default=datetime.utcnow)
 
     project = relationship("Project", back_populates="pipeline_runs")

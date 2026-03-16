@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Text, ForeignKey, Enum as SAEnum
+from sqlalchemy import Boolean, Column, DateTime, Enum as SAEnum, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -26,6 +26,9 @@ class Project(Base):
     slack_channel = Column(String(100))
     alert_email = Column(String(255))
     is_active = Column(Boolean, default=True)
+    # Fix 6: feature flags used by tasks.py — were missing, causing silent no-ops
+    pr_comments_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    auto_fix_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     owner = relationship("User", back_populates="projects")

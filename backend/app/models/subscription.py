@@ -1,8 +1,10 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, Enum as SAEnum
-from sqlalchemy.dialects.postgresql import UUID
-import uuid
-from datetime import datetime
+import datetime as dt
 import enum
+import uuid
+
+from sqlalchemy import Column, Date, DateTime, Enum as SAEnum, ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import UUID
+
 from app.core.database import Base
 
 
@@ -30,6 +32,8 @@ class Subscription(Base):
     status = Column(SAEnum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE)
     current_period_start = Column(DateTime)
     current_period_end = Column(DateTime)
-    runs_used_this_month = Column(String(10), default="0")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Fix 12: was String(10) — must be Integer for arithmetic and atomic DB increments
+    runs_used_this_month = Column(Integer, nullable=False, default=0, server_default="0")
+    billing_period_start = Column(Date, nullable=True, default=dt.date.today)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
