@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/OpsAI-DevOps%20Copilot-blue?style=for-the-badge&logo=robot&logoColor=white" alt="OpsAI" />
+![OpsAI](docs/assets/banner.svg)
+
+<img src="docs/assets/logo.svg" alt="OpsAI Logo" width="64" height="64" />
 
 # 🤖 OpsAI
 
